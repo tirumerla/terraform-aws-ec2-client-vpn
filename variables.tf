@@ -78,6 +78,18 @@ variable "associated_subnets" {
   description = "List of subnets to associate with the VPN endpoint"
 }
 
+variable "use_existing_security_group_ids" {
+  type        = bool
+  description = "Whether to use existing security group ids with client vpn endpoint. If this is true, set `var.existing_security_group_ids`"
+  default     = false
+}
+
+variable "existing_security_group_ids" {
+  type        = list(string)
+  description = "List of security group ids that needs to be attached to the client vpn endpoint. Set this if `var.use_existing_security_group_ids` is set to true."
+  default     = []
+}
+
 variable "authorization_rules" {
   # type = list(object({
   #   name                 = string
@@ -94,6 +106,12 @@ variable "authorization_rules" {
 variable "vpc_id" {
   type        = string
   description = "ID of VPC to attach VPN to"
+}
+
+variable "server_certificate_arn" {
+  default     = null
+  type        = string
+  description = "ARN of the existing ACM server certificate."
 }
 
 variable "ca_common_name" {

@@ -1,12 +1,13 @@
 locals {
   enabled = module.this.enabled
 
-  security_group_enabled      = local.enabled && var.create_security_group
-  mutual_enabled              = local.enabled && var.authentication_type == "certificate-authentication"
-  federated_enabled           = local.enabled && var.authentication_type == "federated-authentication"
-  self_service_portal_enabled = local.federated_enabled && var.self_service_portal_enabled
-  logging_enabled             = local.enabled && var.logging_enabled
-
+  security_group_enabled         = local.enabled && var.create_security_group
+  mutual_enabled                 = local.enabled && var.authentication_type == "certificate-authentication"
+  federated_enabled              = local.enabled && var.authentication_type == "federated-authentication"
+  self_service_portal_enabled    = local.federated_enabled && var.self_service_portal_enabled
+  logging_enabled                = local.enabled && var.logging_enabled
+  existing_security_group_ids    = var.use_existing_security_group_ids ? var.existing_security_group_ids : null
+  server_certificate_arn         = var.server_certificate_arn != null ? var.server_certificate_arn : module.self_signed_cert_server.certificate_arn
   export_client_certificate      = local.mutual_enabled && var.export_client_certificate
   certificate_backends           = ["ACM", "SSM"]
   saml_provider_arn              = local.federated_enabled ? try(aws_iam_saml_provider.default[0].arn, var.saml_provider_arn) : null
@@ -18,6 +19,10 @@ locals {
   root_common_name               = var.root_common_name != null ? var.root_common_name : "${module.this.id}.vpn.client"
   server_common_name             = var.server_common_name != null ? var.server_common_name : "${module.this.id}.vpn.server"
   client_conf_tmpl_path          = var.client_conf_tmpl_path == null ? "${path.module}/templates/client-config.ovpn.tpl" : var.client_conf_tmpl_path
+  network_association_security_group_ids = var.use_existing_security_group_ids ? null : compact(concat(
+    [module.vpn_security_group.id],
+    local.associated_security_group_ids
+  ))
 }
 
 module "self_signed_cert_ca" {
@@ -94,6 +99,7 @@ module "self_signed_cert_root" {
 }
 
 module "self_signed_cert_server" {
+  count   = var.server_certificate_arn != null ? 1 : 0
   source  = "cloudposse/ssm-tls-self-signed-cert/aws"
   version = "0.5.0"
 
@@ -153,7 +159,7 @@ resource "aws_ec2_client_vpn_endpoint" "default" {
   count = local.enabled ? 1 : 0
 
   description            = module.this.id
-  server_certificate_arn = module.self_signed_cert_server.certificate_arn
+  server_certificate_arn = local.server_certificate_arn
   client_cidr_block      = var.client_cidr
   self_service_portal    = local.self_service_portal_enabled ? "enabled" : "disabled"
 
@@ -170,8 +176,10 @@ resource "aws_ec2_client_vpn_endpoint" "default" {
     cloudwatch_log_stream = local.cloudwatch_log_stream
   }
 
-  dns_servers  = var.dns_servers
-  split_tunnel = var.split_tunnel
+  dns_servers        = var.dns_servers
+  split_tunnel       = var.split_tunnel
+  security_group_ids = local.existing_security_group_ids
+  vpc_id             = var.vpc_id
 
   session_timeout_hours = var.session_timeout_hours
 
@@ -225,10 +233,7 @@ resource "aws_ec2_client_vpn_network_association" "default" {
   client_vpn_endpoint_id = join("", aws_ec2_client_vpn_endpoint.default.*.id)
   subnet_id              = var.associated_subnets[count.index]
 
-  security_groups = concat(
-    [module.vpn_security_group.id],
-    local.associated_security_group_ids
-  )
+  security_group_ids = loacl.network_association_security_group_ids
 }
 
 resource "aws_ec2_client_vpn_authorization_rule" "default" {
